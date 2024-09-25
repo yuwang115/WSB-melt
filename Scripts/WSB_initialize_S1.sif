@@ -1,0 +1,191 @@
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+! This sif file is used to read in datasets to initialize for the following inversions
+!
+! Yu Wang edited in Nov 2022, at IMAS
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!---LUA BEGIN
+! assert(loadfile('../COLD.lua'))()
+! assert(loadfile('../WSB.lua'))()
+!---LUA END
+$name = "WSB_readnc_GroundedMask_BM3"
+! FOR DEFAULT USE/UPDATE PARAMETERS IN OPTIM_BETA.IN
+!include OPTIM_BETA.IN
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!#######################################################
+!#######################################################
+Header
+   Mesh DB "." "#meshdb#"
+End
+!#######################################################
+!#######################################################
+Constants
+  sea level = Real #zsl
+  water density = Real #rhoo
+End
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Simulation
+  Coordinate System  = Cartesian 
+  Simulation Type = Steady State
+
+  Steady State Min Iterations = 1
+  Steady State Max Iterations = 1
+
+  Post File = "$name$.vtu"
+  OutPut File = "$name$.result"
+  max output level = 9
+
+End
+!#######################################################
+!#######################################################
+Body 1
+  Equation = 1
+  Material = 1
+  Initial Condition = 1
+End
+!#######################################################
+!#######################################################
+Equation 1
+  Active Solvers(6) = 1 2 3 4 5 6 
+End
+!#######################################################
+!#######################################################
+Material 1
+! Material properties
+  SSA Mean Density = Real #rhoi
+End
+!#######################################################
+!#######################################################
+Initial Condition 1
+! List of variable that must be initialised
+  H = Real 0.0
+  bedrock = Real 0.0
+  Zs= Real 0.0
+  Zb= Real 0.0
+  smb= Real 0.0
+  Mu= Real 0.0
+  slc0=Real 0.0
+  Vobs= Real 0.0
+  dhdt_obs=Real 0.0
+! lowersurface = Variable uppersurface, H, bedrock
+!   Real lua "getlowersurface(tx[0],tx[1],tx[2])"
+End
+!#######################################################
+!#######################################################
+
+Solver 1
+  Equation = "Read ice geometry"
+    Procedure = "GridDataReader" "GridDataReader"
+    Variable = -nooutput dumy1
+   
+!---- NOTE: File is case sensitive, String is not!
+   Filename = File #TOPOGRAPHY_DATA
+
+   X Dim Name = String "x"
+   Y Dim Name = String "y"
+!--- 
+  Variable 1 = File "thickness"
+  Target Variable 1 = String "H"
+  Valid Min Value 1 = Real #MINH
+
+  Variable 2 = File "bed"
+  Target Variable 2 = String "bedrock"
+  
+  Variable 3 = File "surface"
+  Target Variable 3 = String "uppersurface"
+
+  Variable 4 = File "lowersurface"
+  Target Variable 4 = String "lowersurface"
+
+  Exported Variable 1 = H
+  Exported Variable 2 = bedrock
+  Exported Variable 3 = uppersurface
+  Exported Variable 4 = lowersurface
+
+
+
+End
+
+
+!! ## Pick one between solvers 2 and 3
+
+Solver 2
+!!Exec Solver = never
+   Equation = "Flotation"
+      Variable = GroundedMask
+      Procedure = "ElmerIceSolvers" "Flotation"
+
+   Exported Variable 1 = zs
+   Exported Variable 2 = zb
+End
+!#######################################################
+Solver 3
+!!Exec Solver = never
+Equation = "Calculate GroundedMask"
+Procedure = "ElmerIceSolvers" "GroundedSolver"
+Variable = GroundedMask_BM3
+lower surface variable = string lowersurface
+Bedrock variable = string bedrock
+Variable DOFs = 1
+Toler = Real #GLTolerance
+End
+
+
+!#######################################################
+Solver 4
+  Equation = "Read ice viscosity"
+    Procedure = "GridDataReader" "GridDataReader"
+    Variable = -nooutput dumy3
+   
+!---- NOTE: File is case sensitive, String is not!
+   Filename = File #VISCOSITY_DATA
+
+   X Dim Name = String "x"
+   Y Dim Name = String "y"
+!--- 
+  Variable 1 = File "Mumean"
+  Target Variable 1 = String "Mu"
+  Exported Variable 1 = Mu
+End
+!#######################################################
+Solver 5
+  Equation = "Read previous basal resistance parameter beta"
+    !Exec Solver = "Never"
+    Procedure = "GridDataReader" "GridDataReader"
+    Variable = -nooutput dumy4
+   
+!---- NOTE: File is case sensitive, String is not!
+   Filename = File "#SLIP_DATA#"
+
+   X Dim Name = String "x"
+   Y Dim Name = String "y"
+!--- 
+  Variable 1 = File "beta"
+  Target Variable 1 = String "beta0"
+  Exported Variable 1 = beta0
+End
+!#######################################################
+Solver 6
+  Equation = "Read ice velocity"
+    Procedure = "GridDataReader" "GridDataReader"
+    Variable = -nooutput dumy5
+   
+!---- NOTE: File is case sensitive, String is not!
+ Filename = File #VELOCITY_DATA
+
+   X Dim Name = String "x"
+   Y Dim Name = String "y"
+   !X Var Name = File "x_coords" ![default "x"] ! name of the variable for x
+   !Y Var Name = File "y_coords" ![default "y"] ! name of the variable for x
+   Is Time Counter = Logical True
+!--- 
+
+  Variable 1 = File "vx"
+  Target Variable 1 = String "vx"
+  Exported Variable 1 = "vx"
+  Variable 2 = File "vy"
+  Target Variable 2 = String "vy"
+  Exported Variable 2 = "vy"
+End
+!#######################################################
+
+

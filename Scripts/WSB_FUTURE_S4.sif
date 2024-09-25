@@ -1,0 +1,650 @@
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+! This sif file is used to execute the future run from 2015 to 2500
+! 
+! Yu Wang edited in Nov 2022, at IMAS
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+!---LUA BEGIN
+! assert(loadfile('../COLD.lua'))()
+! assert(loadfile('../WSB.lua'))()
+!---LUA END
+
+$SCALARS_INTERVAL=1
+
+$name="WSB_SSP585_Weertman_1km_NMP"
+$BMB_forcing="/g/data/jk72/yw0666/data/CESM2_SSP585_thermal_forcing1995_2300.nc"
+$SMB_forcing="/g/data/jk72/yw0666/data/asmb/CESM2_ssp585_1995-2300_wsb1km.nc"
+$dt = (365/24)/365 
+!$minbeta = -10.0
+! time/restart/output management
+$id= 1
+
+Header
+  Mesh DB "." "../mesh2D_WSB_BM3_refined"
+End
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Constants
+  Sea Level = Real #zsl
+  Water Density = Real #rhoo
+  gamma 0 = Real -11075.4506451341 !! unit: m/yr  !
+  Ice Density = Real #rhoi_si
+  SW Density = Real #rhoo_si
+  Latent Heat = Real #Lf_si        !! -- ## Fusion Latent heat of Ice (J/kg)
+  SW Cp = Real #cw_si
+End
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Simulation
+
+  !# Definition of the projection, see ProjUtils documentation
+  ! Antarctica EPSG:3031
+  projection type = String "polar stereographic south"
+  central_meridian = Real 0.0
+  latitude_of_origin = Real -71.0
+
+
+  Coordinate System  = Cartesian 2D
+  ! This parameter is used in the legacy SubShelfMelt Solver
+  ! Grounding Line Melt = Logical False
+
+  Simulation Type = Transient
+  Simulation Timing = Logical True
+
+  Timestepping Method = "bdf"
+  BDF Order = 2
+  Timestep Intervals(1) = 11664 !486*12*2
+  Timestep Sizes(1) = Real $dt
+
+  ! Add check on the SSAnorm and Hnorm to force Exit in case Elmer did not stop before
+  Exit Condition = Variable Time
+     Real Procedure "USF_ExitCondition" "ExitCondition"
+
+  Steady State Max Iterations = 1
+  Steady State Min Iterations = 1 !2
+
+  Post File = "../vtu_1km/$name$.vtu"
+  OutPut File = "$name$.result"  
+  Output Intervals = 240
+
+  Restart File = "../../WSB_S3_GLmelt/mesh2D_WSB_BM3_refined/WSB_HIST_Weertman_1km_NMP.result"
+  Restart Before Initial Conditions = logical True
+  Restart Time = 0
+
+  max output level = 4
+End
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Body 1
+  Equation = 1
+  Initial Condition = 1
+  Body Force = 1
+  Material = 1
+  ! Boundary Coditions
+End
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Equation 1
+  Active Solvers (11)= 1 2 3 4 5 6 7 8 9 10 11
+End
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Initial Condition 1
+  mueta2 = Variable alpha, Mu
+     Real Lua "tx[0]*tx[0]*tx[1]"
+  Vobs = Variable vx,vy
+     Real Lua "math.sqrt(tx[0]^2 + tx[1]^2)"
+  !beta = Variable beta, groundedmask
+  !   Real MATC "(tx(1) >= -0.5)*(tx(0) - minbeta) + minbeta"   
+End
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+Body Force 1
+  Flow BodyForce 1 = Real 0.0
+  Flow BodyForce 2 = Real 0.0
+  Flow BodyForce 3 = Real #gravity
+
+  smb_tot = Variable smbref, asmb
+        Real Lua "tx[0] + tx[1]"
+
+  Top Surface Accumulation = Equals smb_tot
+
+  !Bottom Surface Accumulation =  Variable meltRate
+      !Real lua "0.0 - tx[0]"
+
+   Bottom Surface Accumulation  = Equals bmb
+   !Variable bmb
+   ! Real lua "tx[0]"
+
+  ! H internal limiters (Thickness solver)
+  H Lower Limit = Real #Hmin
+
+End
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Material 1
+! Material properties
+  Viscosity Exponent = Real #1.0/n
+  Critical Shear Rate = Real 1.0e-10
+
+  SSA Mean Viscosity = Variable alpha, Mu
+     REAL procedure "USF_SSAViscosity" "SSAViscosity"
+  SSA Mean Density = Real #rhoi
+  SSA Critical Thickness = Real #Hmin
+
+  SSA Friction Law = String "linear"
+
+  SSA Friction Parameter = Variable beta
+      REAL procedure "ElmerIceUSF" "TenPowerA"
+
+!! For Save scalar to compute mass flux (=H*SSA_UV)
+  Flux = Equals H
+  SSA Melt Param = String "nmp"
+
+End
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+!#-----------------------------------------------------------------------
+!#                          READ RESTART SOLVER
+
+!#-----------------------------------------------------------------------
+!#                       ADD CORRECTED AREA CELL
+!#-----------------------------------------------------------------------
+!# SOLVER to read true_cell_area.nc file in order to add it into the restart for ISMIP6
+!#     - input  : * cell_area
+!#
+!#     - output : * true_cell_area (only renaming)
+!#
+!#-----------------------------------------------------------------------
+Solver 1
+   Exec Solver = never
+   !Exec Solver = Before Simulation
+   Equation = "UGridDataReader_cellarea"
+   Procedure = "ElmerIceSolvers" "UGridDataReader"
+
+   File Name = File "/g/data/jk72/yw0666/ProcessSMB/True_Area_1km.nc"
+
+   Variable Name 1 = File "cell_area"
+   Target Variable 1 = String "true_cell_area"
+
+   Exported Variable 1 = -elem true_cell_area
+End
+
+Solver 2
+  !Exec Solver = never
+  Exec Solver = "before all" 
+  equation = "DeltaT"
+  procedure = "GridDataReader" "GridDataReader"
+  Filename = File #datadir#"coeff_gamma0_deltat_quadratic_local_median.nc"
+  X Dim Name = String "X" 
+  Y Dim Name = String "Y"
+  X Var Name = String "x" 
+  Y Var Name = String "y"
+  X Epsilon X = Real 1.0e-2 
+  Y Epsilon Y = Real 1.0e-2 
+  Interpolation Bias = Real 0.0 
+  Interpolation Multiplier = Real 1.0 
+  Variable 1 = deltat_basin
+  Target Variable 1 = deltat_basin
+  !Exported Variable 1 = -elem basins
+  Enable Scaling = Logical False
+End
+!#-----------------------------------------------------------------------
+!#                          SMB SOLVER
+!#-----------------------------------------------------------------------
+!# SOLVER to read smb from netcdf file (typically RACMO or MAR output)
+!#     - input  : * smb netcdf file (Variable 1 data file)
+!#                * smb variable name (Variable 1)
+!#
+!#     - output : smb (Target Variable 1)
+!#
+!#     - method : interpolation from RACMO grid to ELMER element
+!#                using linear interpolation (natural neighbourg, nn-c library)
+!#                for other interpolation method change method keyword value
+!#                (see elmerice/Solvers/Documentation/Scattered2DInterpolator.md)
+!#-----------------------------------------------------------------------
+
+Solver 3
+    Exec Solver = Before Simulation
+    Equation = Reader1
+    Procedure = "GridDataReader" "GridDataReader"
+    Variable = -nooutput dumy1
+   
+    !---- NOTE: File is case sensitive, String is not!
+    Filename = File #SMB_DATA
+
+    X Dim Name = String "nx"
+    Y Dim Name = String "ny"
+    X Var Name = String "x_coord"
+    Y Var Name = String "y_coord"
+    Epsilon X = Real 1.0e-2
+    Epsilon Y = Real 1.0e-2
+    Variable 1 = smbref
+    Enable Scaling = Logical False
+    Exported Variable 1 = smbref
+End
+
+Solver 4
+   ! SMB with anomaly
+   Exec Interval = 24   !365.25 / dt = 24
+   ! SMB without anomaly
+   !Exec Solver = Never
+   Equation = "SMBDataReader"
+   Procedure = "UGridDataReader" "UGridDataReader"
+   
+   File Name = File "$SMB_forcing$"
+   
+   !Time Point = Variable Time
+   !   REAL LUA "20 + tx[0]"
+   Time Point = Variable Time, 20
+      Real lua "calculateTimePoint(tx[0], tx[1])"
+
+   Variable Name 1 = File "asmb"
+   Exported Variable 1 = -elem asmb
+
+   Update Exported Variables = Logical True
+   Exported Variable 2 = -elem "smb_tot"
+End
+!#-----------------------------------------------------------------------
+!#                          BMB SOLVER
+!#-----------------------------------------------------------------------
+!# SOLVER to compute basal melt based on ISMIP6 equation
+!#     - input  : * netcdf file interpolated onto ELMER grid via CDO (File Name)
+!#                * variable name corresponding to ice shelf melt    (Variable Name)
+!#
+!#     - output : * Bottom Surface Accumulation (used by Body Force 1) (Exported Variable 1 Melt)
+!#                * Boxes definition (Exported Variable 2 Boxes)
+!#
+!#     - option : Mask melt based on current grounded mask (Mask melt)
+!#                       => tuning on treatment at GL based on Simulation flag : 'Grounding Line Melt'
+!#
+!#     - comments: PICO need some pre-compute varaible as :
+!#                                 * distGL
+!#                                 * FrontMask
+!#                                 * distIF (ice shelf front)
+!#-----------------------------------------------------------------------
+Solver 5
+  !Exec Solver = "before all"
+  Exec Interval = 24   !365.25 / dt = 24
+  equation = "TFeq"
+  procedure = "GridDataReader" "GridDataReader"
+  Is Time index = Logical True
+  !Time Point = Variable Time
+  !    REAL LUA "20 + tx[0]"
+
+  Time Point = Variable Time, 20
+    Real lua "calculateTimePoint(tx[0], tx[1])"
+
+
+  !Time Offset = Integer 20
+  Filename = File "$BMB_forcing$"
+  X Dim Name = String "x" 
+  Y Dim Name = String "y"
+  Z Dim Name = String "z"
+  X Var Name = String "x" 
+  Y Var Name = String "y"
+  Z Var Name = String "z"
+  Time Dim Name = String "time"
+  Time Var Name = String "time"
+  X Epsilon = Real 1.0e-2 
+  Y Epsilon = Real 1.0e-2 
+  Time Epsilon = Real 10.0
+  Elmer Coordinate 3 = String "zb"
+  Interpolation Bias = Real 0.0 
+  Interpolation Multiplier = Real 1.0 
+  Variable 1 = thermal_forcing
+  Target Variable 1 = String "t_forcing" 
+  Enable Scaling = Logical False
+End
+
+Solver 6
+   !Exec Solver = "Before Timestep"
+   Exec Interval = 24 
+   Equation = "Get Meltrate"
+   Procedure = "MeltrateSolver" "MeltrateSolver"
+   Nonlocal Melt Rate = Logical False !would be anyhow the default
+   Meltrate Mask = String "GroundedMask"
+   Variable = bmb 
+   Variable DOFs = 1 
+End
+
+!#-----------------------------------------------------------------------
+!#                          SSA SOLVER
+!#-----------------------------------------------------------------------
+!# SOLVER to compute SSA velocity
+!#     - input  : * Material section nned to contain the friction law parameters (see doc)
+!#
+!#     - option : * GL integration points number to increase precision when computing
+!#                  the grounded/floating area of partially floated element precision. 
+!#
+!#     - principal output  : * SSA velocity [XXX] (nodal)
+!#     - optional  outputs : * transport across GL [m/s ???] (element)
+!#                           * transport across calving front [m/s ???] (element)
+!#                           * element average basal stress [???] (element)
+!#                           * effective friction coefficient [???] (nodal)
+!#
+!#     - comments: * Friction law defined in material section
+!#-----------------------------------------------------------------------
+Solver 7
+
+  Equation = "SSA"
+  Procedure = "ElmerIceSolvers" "SSABasalSolver"
+
+  ! primary variable
+  Variable = -dofs 2 "SSAVelocity"
+
+  !! numerical setting
+  !  include elmer.lsol
+  Linear System Use Hypre = Logical True
+  Linear System Solver = Iterative
+  Linear System Iterative Method = "FlexGMRes"
+  !Linear System Solver = Direct
+  !Linear System Direct Method = cpardiso
+  Linear System Max Iterations = 1000
+  Linear System Convergence Tolerance = 1.0E-08
+  Linear System Abort Not Converged = True
+  Linear System Residual Output = 1
+  !Linear System Preconditioning = 'ILU1'
+  Linear System Preconditioning = "boomeramg"
+
+  Nonlinear System Max Iterations = 50
+  Nonlinear System Convergence Tolerance = 1.0e-05
+  Nonlinear System Newton After Iterations =8
+  Nonlinear System Newton After Tolerance = 1.0e-04
+  !Nonlinear System Relaxation Factor = 1.00
+  !Nonlinear System Abort Not Converged = Logical True
+  !Nonlinear System Linesearch = Logical True
+  !Nonlinear System Linesearch Iterations = Integer 30
+  !Nonlinear System Linesearch Factor = Real 0.5
+  !Nonlinear System Linesearch Limit = Real 0.5
+
+  !Bulk Assembly Timing = Logical True
+  !Linear System Timing = Logical True
+  !Linear System Timing Cumulative = Logical True
+
+  Steady State Convergence Tolerance = 1.0e-4
+  !Steady State Relaxation Factor = 1
+
+  ! GL subgrid element
+  Sub-Element GL parameterization = Logical True
+  GL integration points number = Integer 20
+
+  velocity norm limit = Real 30000.0
+
+  ! Secondary variable (output)
+  ! grounding line flux [m/s] wrt cell area
+  Compute grounding line flux = Logical TRUE
+  Exported Variable 1 = -elem "ligroundf"
+
+  ! calving front flux [m/s] wrt cell area
+  Compute calving front flux = Logical TRUE
+  Exported Variable 2 = -elem "calving_front_flux"
+
+ ! if variables with this names exist compute the
+ ! element average basal stress
+ ! and nodal effective friction coefficient
+  Exported Variable 3 = -elem "strbasemag"  
+  Exported Variable 4 = "Ceff"              
+  Exported Variable 5 = "mueta2"  
+  Exported Variable 6 = "alpha"
+  Exported Variable 7 = "mu"
+  Exported Variable 8 = "Vobs"
+  Update Exported Variables = Logical True
+End
+
+!#-----------------------------------------------------------------------
+!#                          THICKNESS SOLVER
+!#-----------------------------------------------------------------------
+!# SOLVER to compute H evolution
+!#     - input  : * SSA velocity
+!#                * BMB
+!#                * SMB
+!#
+!#     - principal output  : * H [XXX] (nodal)
+!#     - optional  outputs : * dh/dt (H velocity) [???] (nodal)
+!#                           * element averaged surface mass balance [XXX, >0 blabla](elemental)
+!#                           * element averaged basal mass balance [XXX, >0 blabla] (elemental)
+!#-----------------------------------------------------------------------
+Solver 8
+
+   Equation = "Thickness"
+   Procedure = "ElmerIceSolvers" "ThicknessSolver"
+
+   ! primary variable
+   Variable = -dofs 1 "H"
+
+   !!!!!! Sub-element melting for Grounding line !!!!!!
+!  Sub-Element GL melting = Logical True
+   GL integration points number = Integer 20
+   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+   ! calculate dH/dt : elmerinternal routines
+   Calculate Velocity = Logical True
+
+   ! numerical setting
+    Linear System Solver = Iterative
+    Linear System Iterative Method = "IDRS"
+    Linear System Max Iterations = 1000
+    Linear System Convergence Tolerance = 1.0E-12
+    Linear System Abort Not Converged = Logical True
+    Linear System Residual Output = 1
+    Linear System Preconditioning = "ILU0"
+   
+   ! equation is linear if no min/max
+    Nonlinear System Max Iterations = 15
+    Nonlinear System Convergence Tolerance  = 1.0e-08
+    Nonlinear System Relaxation Factor = 1.00
+
+    Bulk Assembly Timing = Logical True
+    Linear System Timing = Logical True
+    Linear System Timing Cumulative = Logical True
+
+    Steady State Convergence Tolerance = 1.0e-6
+
+    Stabilization Method = Stabilized
+    Transient Stabilisation = logical true
+    Apply Dirichlet = Logical FALSE
+    Apply Limiter = Logical TRUE
+    ! get the residual
+    Calculate Loads = Logical TRUE
+
+!!  the convection velocity (mean horizontal velocity)
+    Flow Solution Name = String "SSAVelocity"
+
+  ! secondary variables (output): averaged surface and basal mass balance
+  Compute averaged mass balances = Logical True
+
+  Exported Variable 1 = -elem acabf
+  Exported Variable 2 = -elem libmassbf
+    
+End
+
+!#-----------------------------------------------------------------------
+!#                          FLOTATION SOLVER
+!#-----------------------------------------------------------------------
+!# SOLVER to apply flotation
+!#     - input  : * H
+!#                * bedrock
+!#                * ice and water density
+!#
+!#     - option : * GL integration points number to increase precision when computing
+!#                  the grounded/floating area of partially floated element precision. 
+!#                  20 is choosen by consistency with SSA solver
+!#
+!#     - principal output  : * groundedmask [-1 afloat, 0 grounded, 1 grounded] (nodal)
+!#     - optional  outputs : * surface elevation (nodal)
+!#                           * ice shelf draft (nodal)
+!#                           * height above flotation (nodal)
+!#                           * ice mask [0 no ice, 1 ice] (elemental)
+!#                           * grounded fraction [] (elemental)
+!#                           * floating fraction [] (elemental)
+!#-----------------------------------------------------------------------
+Solver 9
+   Equation = "Flotation"
+   Procedure = "ElmerIceSolvers" "Flotation"
+
+   ! primary variable
+   Variable = GroundedMask
+
+   ! options
+   GL integration points number = Integer 20
+
+   ! secondary variables (output): surface and base altitude, heigh above flotation
+   !                               ice mask, floated and grounded fraction
+   Exported Variable 1 = zs
+   Exported Variable 2 = zb
+   Exported Variable 3 = haf
+
+   compute ice area fractions = Logical TRUE
+   Exported Variable 4 = -elem "sftgif" 
+   Exported Variable 5 = -elem "sftgrf"  
+   Exported Variable 6 = -elem "sftflf"  
+End
+
+!#-----------------------------------------------------------------------
+!#                          XIOS Output SOLVER
+!#-----------------------------------------------------------------------
+!# SOLVER to manage XIOS output (for setting required output, see XIOS xmlf files)
+!#     - input  : * all previous principal and secondary variables
+!#
+!#     - principal output  : * N/A
+!#     - optional  outputs : * N/A
+!#-----------------------------------------------------------------------
+Solver 10
+   !Exec Solver = never
+   Exec Solver = After Timestep
+   Equation = "XIOSOutPutSolve"
+   Procedure = "ElmerIceSolvers" "XIOSOutputSolver"
+
+   Skip Edges = Logical True
+
+   time_units=String "1y"
+
+! time-step: optional the duration of the tile step; other time_step=time_units*dt
+   timestep=String "15d"
+
+! for consitency check we check that taking 1/dt time_step leads 
+!  to the same duration than time_units with xx seconds
+   timestep tolerance = Real 1.0
+
+! to set the strat date from elmer; star date will be reference date + (Gettime()-dt)*time_units
+! i.e. for restart if time=10+dt => start_date=2025-01-01
+   reference date=String "2015-01-01"
+
+! name format
+   file names suffix = String "_$name$"
+
+! node and elem vars
+   ! geometry
+   Scalar Field 1 = String "h"
+   Scalar Field 1 compute cell average = Logical True
+
+   Scalar Field 2 = String "zs"
+   Scalar Field 2 compute cell average = Logical True
+
+   Scalar Field 3 = String "zb"
+   Scalar Field 3 compute cell average = Logical True
+
+   Scalar Field 4 = String "bedrock"
+   Scalar Field 4 compute cell average = Logical True
+
+   Scalar Field 5 = String "haf"
+   Scalar Field 5 compute cell average = Logical True
+
+   ! Friction and viscosity
+   Scalar Field 6 = String "strbasemag"
+   Scalar Field 7 = String "alpha"
+   Scalar Field 8 = String "beta"
+   Scalar Field 9 = String "ceff"
+
+   ! Mask and fraction
+   Scalar Field 10 = String "sftgif"
+   Scalar Field 11 = String "sftgrf"
+   Scalar Field 12 = String "sftflf"
+   Scalar Field 13 = String "groundedmask"
+
+   ! Mass balance
+   Scalar Field 14 = String "acabf"
+   Scalar Field 15 = String "libmassbf"
+   Scalar Field 16 = String "h loads"
+   Scalar Field 17 = String "smbref"
+   Scalar Field 18 = String "bmb"
+
+   ! Velocities
+   Scalar Field 19= String "ssavelocity 1"
+   Scalar Field 19 compute cell average = Logical True
+
+   Scalar Field 20= String "ssavelocity 2"
+   Scalar Field 20 compute cell average = Logical True
+
+   Scalar Field 21= String "h velocity"
+   Scalar Field 21 compute cell average = Logical True
+
+   ! Transport across GL and IF
+   Scalar Field 22 = String "ligroundf"
+   Scalar Field 23 = String "calving_front_flux"
+   
+   ! others
+   !Scalar Field 24 = String "basins"
+   Scalar Field 24 = String "true_cell_area"
+   Scalar Field 25 = String "mu"
+
+   !Global Variables
+   Global Variable 1 = String "time"
+
+   Solver info level = integer 4
+
+End
+
+Solver 11
+  Exec Solver = never
+  !Exec Solver = After Timestep
+  Equation = "Save Scalars"
+   Procedure = File "SaveData" "SaveScalars"
+
+  Parallel Reduce = logical True
+
+   Filename = File "scalars_$name$_$id$.dat"
+
+  Variable 1 = "Time"
+
+   Variable 2 = "H"
+   Operator 2 = "volume"
+   Operator 3 = "int"
+
+   Variable 4 = "H Velocity"
+   Operator 4 = "int"
+
+    Variable 5 = "H loads"
+    operator 5 = "sum"
+
+   Variable 6 = "smbref"
+   operator 6 = "int"
+
+   Variable 7 = "bmb"
+   operator 7 = "volume"
+
+   Variable 8 = "h velocity"
+   operator 8 = max
+   operator 9 = min
+
+   Variable 10 = "ssavelocity"
+   operator 10 = max
+   operator 11 = min
+
+End
+
+!#####
+Boundary Condition 1
+  Name = "Ice Front"
+  Target Boundaries = 1
+  Save Scalars = logical true
+  Calving Front = logical true
+End
+
+Boundary Condition 2
+  Name = "Inland Lateral"
+  Target Boundaries = 2
+  Save Scalars = logical true
+  SSAVELOCITY 1 = Equals vx
+  SSAVELOCITY 2 = Equals vy
+  !Normal-Tangential Velocity = True
+  !Velocity 1 = Real 0.0
+End
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
