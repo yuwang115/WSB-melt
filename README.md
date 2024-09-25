@@ -34,7 +34,7 @@ DOI = {10.5194/egusphere-2024-1005}
 
 ## License
 
-This repository is licensed under the MIT License. See the `LICENSE` file for more details.
+This repository is licensed under the CC0 1.0 Universal License. See the `LICENSE` file for more details.
 
 ## Contact
 
