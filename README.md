@@ -1,5 +1,5 @@
 
-# Sensitivity of Future Evolution of the Wilkes Subglacial Basin Ice Sheet to Grounding Line Melt Parameterizations
+# Sensitivity of the future evolution of the Wilkes Subglacial Basin ice sheet to grounding-line melt parameterizations
 
 ## Overview
 
